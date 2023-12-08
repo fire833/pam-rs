@@ -205,71 +205,50 @@ impl PamHandle {
     /// Panics if the provided prompt string contains a nul byte
     pub fn get_user(&self, prompt: Option<&str>) -> PamResult<String> {
         let ptr: *mut c_char = std::ptr::null_mut();
-        let prompt_string;
-        let c_prompt = match prompt {
-            Some(p) => {
-                prompt_string = CString::new(p).unwrap();
-                prompt_string.as_ptr()
-            }
-            None => std::ptr::null(),
-        };
-        let res = unsafe { pam_get_user(self, &ptr, c_prompt) };
-        if PamResultCode::PAM_SUCCESS == res && !ptr.is_null() {
-            let const_ptr = ptr as *const c_char;
-            let bytes = unsafe { CStr::from_ptr(const_ptr).to_bytes() };
-            String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_CONV_ERR)
-        } else {
-            Err(res)
-        }
+        let c_prompt = self.get_c_prompt(prompt);
+        let code = unsafe { pam_get_user(self, &ptr, c_prompt) };
+        self.get_post(ptr, code)
     }
 
     pub fn get_authtok(&self, item: ItemType, prompt: Option<&str>) -> PamResult<String> {
-        let token: *mut c_char = std::ptr::null_mut();
-        self.get_authtok_post(token, unsafe {
-            pam_get_authtok(
-                self,
-                item,
-                &token,
-                prompt
-                    .and_then(|x| CString::new(x).ok())
-                    .map_or(core::ptr::null(), |x| x.as_ptr()),
-            )
-        })
+        let ptr: *mut c_char = std::ptr::null_mut();
+        let c_prompt = self.get_c_prompt(prompt);
+        let code = unsafe { pam_get_authtok(self, item, &ptr, c_prompt) };
+        self.get_post(ptr, code)
     }
 
     pub fn get_authtok_verify(&self, prompt: Option<&str>) -> PamResult<String> {
-        let token: *mut c_char = std::ptr::null_mut();
-        self.get_authtok_post(token, unsafe {
-            pam_get_authtok_verify(
-                self,
-                &token,
-                prompt
-                    .and_then(|x| CString::new(x).ok())
-                    .map_or(core::ptr::null(), |x| x.as_ptr()),
-            )
-        })
+        let ptr: *mut c_char = std::ptr::null_mut();
+        let c_prompt = self.get_c_prompt(prompt);
+        let code = unsafe { pam_get_authtok_verify(self, &ptr, c_prompt) };
+        self.get_post(ptr, code)
     }
 
     pub fn get_authtok_noverify(&self, prompt: Option<&str>) -> PamResult<String> {
-        let token: *mut c_char = std::ptr::null_mut();
-        self.get_authtok_post(token, unsafe {
-            pam_get_authtok_noverify(
-                self,
-                &token,
-                prompt
-                    .and_then(|x| CString::new(x).ok())
-                    .map_or(core::ptr::null(), |x| x.as_ptr()),
-            )
-        })
+        let ptr: *mut c_char = std::ptr::null_mut();
+        let c_prompt = self.get_c_prompt(prompt);
+        let code = unsafe { pam_get_authtok_noverify(self, &ptr, c_prompt) };
+        self.get_post(ptr, code)
     }
 
-    fn get_authtok_post<'a>(&self, token: *mut c_char, code: PamResultCode) -> PamResult<String> {
+    fn get_post<'a>(&self, token: *mut c_char, code: PamResultCode) -> PamResult<String> {
         if PamResultCode::PAM_SUCCESS == code && !token.is_null() {
             let const_ptr = token as *const c_char;
             let bytes = unsafe { CStr::from_ptr(const_ptr).to_bytes() };
             String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_CONV_ERR)
         } else {
             Err(code)
+        }
+    }
+
+    fn get_c_prompt(&self, prompt: Option<&str>) -> *const i8 {
+        let prompt_string;
+        match prompt {
+            Some(p) => {
+                prompt_string = CString::new(p).unwrap();
+                prompt_string.as_ptr()
+            }
+            None => std::ptr::null(),
         }
     }
 }
