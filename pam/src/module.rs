@@ -5,6 +5,8 @@ use std::ffi::{CStr, CString};
 
 use constants::{PamFlag, PamResultCode};
 
+use crate::items::ItemType;
+
 /// Opaque type, used as a pointer when making pam API calls.
 ///
 /// A module is invoked via an external function such as `pam_sm_authenticate`.
@@ -49,6 +51,25 @@ extern "C" {
     fn pam_get_user(
         pamh: *const PamHandle,
         user: &*mut c_char,
+        prompt: *const c_char,
+    ) -> PamResultCode;
+
+    fn pam_get_authtok(
+        pamh: *const PamHandle,
+        item: crate::items::ItemType,
+        authtok: &*mut c_char,
+        prompt: *const c_char,
+    ) -> PamResultCode;
+
+    fn pam_get_authtok_noverify(
+        pamh: *const PamHandle,
+        authtok: &*mut c_char,
+        prompt: *const c_char,
+    ) -> PamResultCode;
+
+    fn pam_get_authtok_verify(
+        pamh: *const PamHandle,
+        authtok: &*mut c_char,
         prompt: *const c_char,
     ) -> PamResultCode;
 }
@@ -160,7 +181,7 @@ impl PamHandle {
     /// Panics if the provided item key contains a nul byte
     pub fn set_item_str<T: crate::items::Item>(&mut self, item: T) -> PamResult<()> {
         let res =
-            unsafe { pam_set_item(self, T::type_id(), item.into_raw().cast::<libc::c_void>())};
+            unsafe { pam_set_item(self, T::type_id(), item.into_raw().cast::<libc::c_void>()) };
         if PamResultCode::PAM_SUCCESS == res {
             Ok(())
         } else {
@@ -199,6 +220,56 @@ impl PamHandle {
             String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_CONV_ERR)
         } else {
             Err(res)
+        }
+    }
+
+    pub fn get_authtok(&self, item: ItemType, prompt: Option<&str>) -> PamResult<String> {
+        let token: *mut c_char = std::ptr::null_mut();
+        self.get_authtok_post(token, unsafe {
+            pam_get_authtok(
+                self,
+                item,
+                &token,
+                prompt
+                    .and_then(|x| CString::new(x).ok())
+                    .map_or(core::ptr::null(), |x| x.as_ptr()),
+            )
+        })
+    }
+
+    pub fn get_authtok_verify(&self, prompt: Option<&str>) -> PamResult<String> {
+        let token: *mut c_char = std::ptr::null_mut();
+        self.get_authtok_post(token, unsafe {
+            pam_get_authtok_verify(
+                self,
+                &token,
+                prompt
+                    .and_then(|x| CString::new(x).ok())
+                    .map_or(core::ptr::null(), |x| x.as_ptr()),
+            )
+        })
+    }
+
+    pub fn get_authtok_noverify(&self, prompt: Option<&str>) -> PamResult<String> {
+        let token: *mut c_char = std::ptr::null_mut();
+        self.get_authtok_post(token, unsafe {
+            pam_get_authtok_noverify(
+                self,
+                &token,
+                prompt
+                    .and_then(|x| CString::new(x).ok())
+                    .map_or(core::ptr::null(), |x| x.as_ptr()),
+            )
+        })
+    }
+
+    fn get_authtok_post<'a>(&self, token: *mut c_char, code: PamResultCode) -> PamResult<String> {
+        if PamResultCode::PAM_SUCCESS == code && !token.is_null() {
+            let const_ptr = token as *const c_char;
+            let bytes = unsafe { CStr::from_ptr(const_ptr).to_bytes() };
+            String::from_utf8(bytes.to_vec()).map_err(|_| PamResultCode::PAM_CONV_ERR)
+        } else {
+            Err(code)
         }
     }
 }
